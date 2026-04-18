@@ -73,8 +73,12 @@ class EnvConfig:
     gun_damage: float = 0.20
     gun_single_attacker_per_target: bool = False
 
+    # 训练课程开关：仅学习态势占位，不进行任何攻击伤害/击落
+    disable_attack_damage: bool = False
+
     auto_assign_targets: bool = True
     script_enemy: bool = True
+    script_enemy_eps: float = 0.0
 
     aircraft_hp: float = 1.0
     crash_altitude: float = 100.0
@@ -104,10 +108,20 @@ class EnvConfig:
     reward_coop_pressure: float = 0.0
     reward_coop_kill: float = 0.0
     reward_man_advantage_gain: float = 0.0
+    reward_alive_advantage: float = 0.0
     reward_being_tailed: float = 0.040
+    reward_tail_lock_combo: float = 0.0
+    reward_mutual_kill: float = 0.0
     reward_low_altitude: float = 0.05
     reward_altitude_band: float = 0.0
     reward_crash_extra: float = 4.0
+    reward_mode: str = 'default'  # default | reference_position
+    ref_d0: float = 200.0
+    ref_dmax: float = 1000.0
+    ref_alt_floor: float = 1000.0
+    ref_wa: float = 0.8
+    ref_wd: float = 0.3
+    ref_wh: float = 0.2
 
     missiles_per_aircraft: int = 0
     incoming_missile_warn_range: float = 0.0
@@ -500,11 +514,13 @@ class MultiAgentWVRCombatEnv:
                 pressure_targets.add(tgt_idx)
 
             for score, ac in selected:
+                fire_events.append((ac.team_id, ac.slot_idx, tgt.slot_idx))
+                if self.cfg.disable_attack_damage:
+                    continue
+
                 # 持续扣除对应 physics_dt 的伤害
                 damage = self.cfg.lock_damage_rate * self.cfg.physics_dt
                 tgt.hp = max(0.0, tgt.hp - damage)
-
-                fire_events.append((ac.team_id, ac.slot_idx, tgt.slot_idx))
                 damage_events.append((ac.team_id, ac.slot_idx, tgt.team_id, tgt.slot_idx, damage))
 
                 if tgt.hp <= 0.0 and tgt.alive:
@@ -549,10 +565,13 @@ class MultiAgentWVRCombatEnv:
                 pressure_targets.add(tgt_idx)
             for score, ac in selected:
                 ac.last_gun_time = self.sim_time
+                gun_events.append((ac.team_id, ac.slot_idx, tgt.slot_idx))
+                if self.cfg.disable_attack_damage:
+                    continue
+
                 damage = self.cfg.gun_damage * (0.65 + 0.35 * max(score, 0.0))
                 tgt.hp = max(0.0, tgt.hp - damage)
                 damage_events.append((ac.team_id, ac.slot_idx, tgt.team_id, tgt.slot_idx, damage))
-                gun_events.append((ac.team_id, ac.slot_idx, tgt.slot_idx))
                 if tgt.hp <= 0.0 and tgt.alive:
                     tgt.alive = False
                     kill_events.append((ac.team_id, ac.slot_idx, tgt.team_id, tgt.slot_idx,
@@ -565,6 +584,8 @@ class MultiAgentWVRCombatEnv:
     def _script_enemy_action(self, ac: AircraftModel) -> int:
         if not ac.alive:
             return 2
+        if self.cfg.script_enemy_eps > 0.0 and float(self.rng.random()) < self.cfg.script_enemy_eps:
+            return int(self.rng.integers(0, self.n_actions))
         tgt_idx = ac.assigned_target if ac.assigned_target is not None else ac.locked_target
         if tgt_idx is None:
             return 0
@@ -633,6 +654,9 @@ class MultiAgentWVRCombatEnv:
                         friendly_coop_pressure_count: int = 0,
                         friendly_coop_kill_count: int = 0,
                         man_advantage_gain: float = 0.0) -> float:
+        if self.cfg.reward_mode == 'reference_position':
+            return self._compute_reference_position_reward()
+
         enemy_alive = self._team_alive(self.enemy)
         friend_alive = self._team_alive(self.friendly)
         enemy_hp = self._team_hp(self.enemy)
@@ -646,6 +670,7 @@ class MultiAgentWVRCombatEnv:
         reward += self.cfg.reward_coop_pressure * float(friendly_coop_pressure_count)
         reward += self.cfg.reward_coop_kill * float(friendly_coop_kill_count)
         reward += self.cfg.reward_man_advantage_gain * max(0.0, float(man_advantage_gain))
+        reward += self.cfg.reward_alive_advantage * float(friend_alive - enemy_alive)
 
         friendly_crashes = sum(1 for ev in crash_events if ev[0] == 0)
         enemy_crashes = sum(1 for ev in crash_events if ev[0] == 1)
@@ -697,10 +722,14 @@ class MultiAgentWVRCombatEnv:
 
             # ------------------------
 
-            if self._gun_score(me, tgt) >= 0.20:
+            gun_s = self._gun_score(me, tgt)
+            lock_s = self._lock_score(me, tgt)
+            if gun_s >= 0.20:
                 reward += self.cfg.reward_gun_window
-            if self._lock_score(me, tgt) >= 0.20:
+            if lock_s >= 0.20:
                 reward += self.cfg.reward_lock_window
+            if rear_adv > 0.6 and lock_s >= 0.20:
+                reward += self.cfg.reward_tail_lock_combo
             if me.z < self.cfg.min_alt:
                 low_frac = (self.cfg.min_alt - me.z) / max(self.cfg.min_alt - self.cfg.crash_altitude, 1.0)
                 reward -= self.cfg.reward_low_altitude * float(np.clip(low_frac, 0.0, 1.5))
@@ -729,6 +758,8 @@ class MultiAgentWVRCombatEnv:
             reward += self.cfg.reward_win
         elif friend_alive == 0 and enemy_alive > 0:
             reward -= self.cfg.reward_lose
+        elif friend_alive == 0 and enemy_alive == 0:
+            reward -= self.cfg.reward_mutual_kill
         elif boundary_outcome is not None:
             if boundary_outcome == 'friendly_abort':
                 reward -= self.cfg.reward_hard_boundary
@@ -747,6 +778,61 @@ class MultiAgentWVRCombatEnv:
             reward -= self.cfg.reward_no_engage_terminate
         elif timeout_outcome is not None:
             reward -= self.cfg.reward_timeout_draw
+        return float(reward)
+
+    def _compute_reference_position_reward(self) -> float:
+        reward = self.cfg.reward_step
+        reward -= self._soft_boundary_penalty()
+
+        alive_count = 0
+        for me in self.friendly:
+            if not me.alive:
+                continue
+            tgt_idx = me.assigned_target if me.assigned_target is not None else me.locked_target
+            if tgt_idx is None or tgt_idx < 0 or tgt_idx >= len(self.enemy):
+                continue
+            tgt = self.enemy[tgt_idx]
+            if not tgt.alive:
+                continue
+            alive_count += 1
+
+            dx, dy, dz, dist, _, _ = self._relative(me, tgt)
+            if dist <= 1e-6:
+                continue
+            dir_x, dir_y, dir_z = dx / dist, dy / dist, dz / dist
+
+            vsx = me.v * math.cos(me.gamma) * math.sin(me.psi)
+            vsy = me.v * math.cos(me.gamma) * math.cos(me.psi)
+            vsz = me.v * math.sin(me.gamma)
+            vtx = tgt.v * math.cos(tgt.gamma) * math.sin(tgt.psi)
+            vty = tgt.v * math.cos(tgt.gamma) * math.cos(tgt.psi)
+            vtz = tgt.v * math.sin(tgt.gamma)
+
+            vs_len = max(1e-6, math.sqrt(vsx * vsx + vsy * vsy + vsz * vsz))
+            vt_len = max(1e-6, math.sqrt(vtx * vtx + vty * vty + vtz * vtz))
+            vsnx, vsny, vsnz = vsx / vs_len, vsy / vs_len, vsz / vs_len
+            vtnx, vtny, vtnz = vtx / vt_len, vty / vt_len, vtz / vt_len
+
+            afz = float(np.clip(dir_x * vsnx + dir_y * vsny + dir_z * vsnz, -1.0, 1.0))
+            afzp = float(np.clip(dir_x * vtnx + dir_y * vtny + dir_z * vtnz, -1.0, 1.0))
+            alpha = math.acos(afz)
+            alphap = math.acos(afzp)
+            f1 = 1.0 - (abs(alpha) + abs(alphap)) / (2.0 * math.pi)
+
+            if dist >= self.cfg.ref_d0:
+                f2 = math.exp(-(dist - self.cfg.ref_d0) / max(self.cfg.ref_dmax, 1.0))
+            else:
+                f2 = math.exp((dist - self.cfg.ref_d0) / max(self.cfg.ref_d0, 1.0))
+
+            if me.z >= self.cfg.ref_alt_floor:
+                f4 = 1.0
+            else:
+                f4 = me.z / max(self.cfg.ref_alt_floor, 1.0)
+
+            reward += self.cfg.ref_wa * f1 + self.cfg.ref_wd * f2 + self.cfg.ref_wh * f4
+
+        if alive_count > 0:
+            reward /= float(alive_count)
         return float(reward)
 
     def _build_action_mask_for_team(self, team: List[AircraftModel]) -> np.ndarray:
