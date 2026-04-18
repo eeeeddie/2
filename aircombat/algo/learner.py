@@ -111,12 +111,18 @@ class CEPGLearner:
         # ================= 1. Critic Update =================
         with torch.no_grad():
             pi_next, _, _ = self.actor(next_obs, next_action_mask, next_hidden)
-            # 用贪心联合动作替代随机采样，降低 target 方差，提升 critic 稳定性
-            next_joint_actions = self._greedy_joint_actions(pi_next, next_action_mask)
-
-            q1_next = self.target_critic1(next_tokens, next_joint_actions)
-            q2_next = self.target_critic2(next_tokens, next_joint_actions)
-            q_next = torch.min(q1_next, q2_next)
+            if self.cfg.q_eval_mode == 'mepg' and pi_next.shape[1] == 2:
+                # MEPG: 精确枚举队友动作期望，减少偏差和方差
+                old_c1, old_c2 = self.critic1, self.critic2
+                self.critic1, self.critic2 = self.target_critic1, self.target_critic2
+                q_next = self._expected_min_q_two_agent(next_tokens, pi_next)
+                self.critic1, self.critic2 = old_c1, old_c2
+            else:
+                # 用贪心联合动作替代随机采样，降低 target 方差，提升 critic 稳定性
+                next_joint_actions = self._greedy_joint_actions(pi_next, next_action_mask)
+                q1_next = self.target_critic1(next_tokens, next_joint_actions)
+                q2_next = self.target_critic2(next_tokens, next_joint_actions)
+                q_next = torch.min(q1_next, q2_next)
 
             log_pi_next = torch.log(pi_next.clamp_min(1e-8))
             # 引入 next_action_mask 过滤非法动作产生的极端 log_pi
@@ -144,13 +150,11 @@ class CEPGLearner:
         pi, _, _ = self.actor(obs, action_mask, hidden)
         log_pi = torch.log(pi.clamp_min(1e-8))
 
-        # 采用 replay 联合动作作为队友条件，显著降低 actor 目标的蒙特卡洛噪声
-        q_for_pi = torch.min(self.critic1(tokens, actions), self.critic2(tokens, actions))
-        # 修复：必须基于当前策略采样的联合动作评估 Q 值，不能使用 replay buffer 中的旧动作
-        with torch.no_grad():
-            current_joint_actions = self._sample_joint_actions(pi, action_mask)
-
-        q_for_pi = torch.min(self.critic1(tokens, current_joint_actions), self.critic2(tokens, current_joint_actions))
+        if self.cfg.q_eval_mode == 'mepg' and pi.shape[1] == 2:
+            q_for_pi = self._expected_min_q_two_agent(tokens, pi)
+        else:
+            # 采用 replay 联合动作作为队友条件，显著降低 actor 目标的蒙特卡洛噪声
+            q_for_pi = torch.min(self.critic1(tokens, actions), self.critic2(tokens, actions))
         q_for_pi = q_for_pi.detach()
 
         # 引入 action_mask 避免非法动作梯度爆炸

@@ -108,7 +108,10 @@ class EnvConfig:
     reward_coop_pressure: float = 0.0
     reward_coop_kill: float = 0.0
     reward_man_advantage_gain: float = 0.0
+    reward_alive_advantage: float = 0.0
     reward_being_tailed: float = 0.040
+    reward_tail_lock_combo: float = 0.0
+    reward_mutual_kill: float = 0.0
     reward_low_altitude: float = 0.05
     reward_altitude_band: float = 0.0
     reward_crash_extra: float = 4.0
@@ -667,6 +670,7 @@ class MultiAgentWVRCombatEnv:
         reward += self.cfg.reward_coop_pressure * float(friendly_coop_pressure_count)
         reward += self.cfg.reward_coop_kill * float(friendly_coop_kill_count)
         reward += self.cfg.reward_man_advantage_gain * max(0.0, float(man_advantage_gain))
+        reward += self.cfg.reward_alive_advantage * float(friend_alive - enemy_alive)
 
         friendly_crashes = sum(1 for ev in crash_events if ev[0] == 0)
         enemy_crashes = sum(1 for ev in crash_events if ev[0] == 1)
@@ -718,10 +722,14 @@ class MultiAgentWVRCombatEnv:
 
             # ------------------------
 
-            if self._gun_score(me, tgt) >= 0.20:
+            gun_s = self._gun_score(me, tgt)
+            lock_s = self._lock_score(me, tgt)
+            if gun_s >= 0.20:
                 reward += self.cfg.reward_gun_window
-            if self._lock_score(me, tgt) >= 0.20:
+            if lock_s >= 0.20:
                 reward += self.cfg.reward_lock_window
+            if rear_adv > 0.6 and lock_s >= 0.20:
+                reward += self.cfg.reward_tail_lock_combo
             if me.z < self.cfg.min_alt:
                 low_frac = (self.cfg.min_alt - me.z) / max(self.cfg.min_alt - self.cfg.crash_altitude, 1.0)
                 reward -= self.cfg.reward_low_altitude * float(np.clip(low_frac, 0.0, 1.5))
@@ -750,6 +758,8 @@ class MultiAgentWVRCombatEnv:
             reward += self.cfg.reward_win
         elif friend_alive == 0 and enemy_alive > 0:
             reward -= self.cfg.reward_lose
+        elif friend_alive == 0 and enemy_alive == 0:
+            reward -= self.cfg.reward_mutual_kill
         elif boundary_outcome is not None:
             if boundary_outcome == 'friendly_abort':
                 reward -= self.cfg.reward_hard_boundary

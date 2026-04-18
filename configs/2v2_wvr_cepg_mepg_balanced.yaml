@@ -50,31 +50,35 @@ env:
 
   auto_assign_targets: true
   script_enemy: true
-  script_enemy_eps: 0.15
+  script_enemy_eps: 0.10
   aircraft_hp: 1.0
 
   preferred_altitude: 4500.0
   preferred_altitude_tol: 2200.0
 
-  reward_kill: 24.0
-  reward_loss: 10.0
-  reward_step: -0.002
-  reward_win: 32.0
-  reward_lose: 15.0
-  reward_damage_enemy: 3.0
-  reward_damage_friend: 1.8
+  reward_kill: 16.0
+  reward_loss: 20.0
+  reward_step: -0.001
+  reward_win: 50.0
+  reward_lose: 25.0
+  reward_damage_enemy: 2.0
+  reward_damage_friend: 3.2
 
   reward_lock_friendly: 0.003
   reward_lock_enemy: 0.0
-  reward_tail_pos: 0.020
+  reward_tail_pos: 0.045
   reward_nose_on: 0.004
-  reward_gun_window: 0.012
-  reward_lock_window: 0.006
+  reward_gun_window: 0.020
+  reward_lock_window: 0.020
+  reward_lock_hold: 0.040
   reward_support: 0.020
   reward_coop_pressure: 0.020
   reward_coop_kill: 6.0
   reward_man_advantage_gain: 6.0
-  reward_being_tailed: 0.020
+  reward_alive_advantage: 3.0
+  reward_being_tailed: 0.080
+  reward_tail_lock_combo: 0.080
+  reward_mutual_kill: 20.0
 
   reward_low_altitude: 0.05
   reward_altitude_band: 0.0
