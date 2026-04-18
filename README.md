@@ -61,3 +61,4 @@ python train_parallel.py --config configs/2v2_wvr_cepg_mepg_balanced.yaml --devi
 
 该配置启用 `q_eval_mode: mepg`（2v2 下对队友动作做精确期望），并适度弱化 rule 敌机脚本（`script_enemy_eps`）与重平衡结果/形状奖励，以提升收敛概率。
 同时加入“反 1 换 1”导引：提高 `reward_loss/reward_lose`、增加 `reward_alive_advantage` 与 `reward_mutual_kill`，并加强 `tail + lock` 组合奖励。
+日志统计建议优先看 `friendly_kills`（己方击落）而不是 `kill_events` 总数，后者包含敌我双方事件。

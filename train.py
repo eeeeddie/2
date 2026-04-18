@@ -284,7 +284,7 @@ def main() -> None:
             ep_len += 1
             env_steps += 1
             total_fire += len(info.get('fire_events', []))
-            total_kill += len(info.get('kill_events', []))
+            total_kill += int(info.get('friendly_kills', 0))
             if tac is not None:
                 tac.update(env.sim_time, env.friendly, env.enemy, env.missiles)
                 for _, _, target_team, _, pos in info.get('kill_events', []):

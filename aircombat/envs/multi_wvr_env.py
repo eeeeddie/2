@@ -1096,6 +1096,10 @@ class MultiAgentWVRCombatEnv:
             'friendly_coop_pressure_count': friendly_coop_pressure_count,
             'friendly_coop_kill_count': friendly_coop_kill_count,
             'man_advantage_gain': man_advantage_gain,
+            'friendly_kills': int(sum(1 for ev in kill_events if ev[0] == 0 and ev[2] == 1)),
+            'enemy_kills': int(sum(1 for ev in kill_events if ev[0] == 1 and ev[2] == 0)),
+            'friendly_crashes': int(sum(1 for ev in crash_events if ev[0] == 0)),
+            'enemy_crashes': int(sum(1 for ev in crash_events if ev[0] == 1)),
         }
         return self._get_transition_view(), reward, done, info
 

@@ -56,29 +56,29 @@ env:
   preferred_altitude: 4500.0
   preferred_altitude_tol: 2200.0
 
-  reward_kill: 16.0
-  reward_loss: 20.0
+  reward_kill: 8.0
+  reward_loss: 10.0
   reward_step: -0.001
-  reward_win: 50.0
-  reward_lose: 25.0
-  reward_damage_enemy: 2.0
-  reward_damage_friend: 3.2
+  reward_win: 20.0
+  reward_lose: 16.0
+  reward_damage_enemy: 1.0
+  reward_damage_friend: 1.2
 
   reward_lock_friendly: 0.003
   reward_lock_enemy: 0.0
-  reward_tail_pos: 0.045
+  reward_tail_pos: 0.030
   reward_nose_on: 0.004
-  reward_gun_window: 0.020
-  reward_lock_window: 0.020
-  reward_lock_hold: 0.040
-  reward_support: 0.020
-  reward_coop_pressure: 0.020
-  reward_coop_kill: 6.0
-  reward_man_advantage_gain: 6.0
-  reward_alive_advantage: 3.0
-  reward_being_tailed: 0.080
-  reward_tail_lock_combo: 0.080
-  reward_mutual_kill: 20.0
+  reward_gun_window: 0.015
+  reward_lock_window: 0.015
+  reward_lock_hold: 0.030
+  reward_support: 0.015
+  reward_coop_pressure: 0.015
+  reward_coop_kill: 2.0
+  reward_man_advantage_gain: 2.0
+  reward_alive_advantage: 0.8
+  reward_being_tailed: 0.060
+  reward_tail_lock_combo: 0.030
+  reward_mutual_kill: 8.0
 
   reward_low_altitude: 0.05
   reward_altitude_band: 0.0
@@ -111,6 +111,9 @@ algo:
   huber_delta: 1.0
   grad_clip_norm: 5.0
   q_eval_mode: mepg
+  alpha_auto: true
+  alpha_lr: 0.0003
+  target_entropy_ratio: 0.55
 
   batch_size: 256
   buffer_size: 200000

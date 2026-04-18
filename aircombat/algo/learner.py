@@ -22,6 +22,9 @@ class AlgoConfig:
     huber_delta: float = 1.0
     grad_clip_norm: float = 10.0
     q_eval_mode: str = 'greedy'  # greedy | mepg
+    alpha_auto: bool = True
+    alpha_lr: float = 1e-4
+    target_entropy_ratio: float = 0.55
 
 
 class CEPGLearner:
@@ -34,6 +37,14 @@ class CEPGLearner:
         self.cfg = cfg
         self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=cfg.lr_actor)
         self.critic_opt = torch.optim.Adam(list(critic1.parameters()) + list(critic2.parameters()), lr=cfg.lr_critic)
+        self.log_alpha = None
+        self.alpha_opt = None
+        self.target_entropy = None
+        if cfg.alpha_auto:
+            init_alpha = max(cfg.alpha, 1e-6)
+            self.log_alpha = torch.tensor(float(torch.log(torch.tensor(init_alpha))), device=self.device, requires_grad=True)
+            self.alpha_opt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
+            self.target_entropy = None
 
         self.actor_lr_scheduler = LinearLR(self.actor_opt, start_factor=0.01, total_iters=2000)
 
@@ -107,6 +118,10 @@ class CEPGLearner:
         rewards = batch['rewards']
         dones = batch['dones']
         valid = batch['agent_alive'].float()
+        n_actions = action_mask.shape[-1]
+        alpha = float(self.log_alpha.exp().item()) if self.log_alpha is not None else self.cfg.alpha
+        if self.target_entropy is None:
+            self.target_entropy = float(self.cfg.target_entropy_ratio * torch.log(torch.tensor(float(n_actions))).item())
 
         # ================= 1. Critic Update =================
         with torch.no_grad():
@@ -126,7 +141,7 @@ class CEPGLearner:
 
             log_pi_next = torch.log(pi_next.clamp_min(1e-8))
             # 引入 next_action_mask 过滤非法动作产生的极端 log_pi
-            v_next_val = pi_next * (q_next - self.cfg.alpha * log_pi_next)
+            v_next_val = pi_next * (q_next - alpha * log_pi_next)
             v_next = (v_next_val * next_action_mask).sum(dim=-1)
 
             target = rewards.unsqueeze(-1) + self.cfg.gamma * (1.0 - dones.unsqueeze(-1)) * v_next
@@ -158,7 +173,7 @@ class CEPGLearner:
         q_for_pi = q_for_pi.detach()
 
         # 引入 action_mask 避免非法动作梯度爆炸
-        actor_obj = pi * (q_for_pi - self.cfg.alpha * log_pi)
+        actor_obj = pi * (q_for_pi - alpha * log_pi)
         actor_obj = (actor_obj * action_mask).sum(dim=-1)
         actor_loss = -(actor_obj * valid).sum() / valid.sum().clamp_min(1.0)
 
@@ -176,6 +191,15 @@ class CEPGLearner:
         ent = (ent * action_mask).sum(dim=-1)
         ent = (ent * valid).sum() / valid.sum().clamp_min(1.0)
 
+        alpha_loss_val = 0.0
+        if self.log_alpha is not None and self.alpha_opt is not None:
+            alpha_loss = self.log_alpha * (ent.detach() - self.target_entropy)
+            self.alpha_opt.zero_grad(set_to_none=True)
+            alpha_loss.backward()
+            self.alpha_opt.step()
+            alpha_loss_val = float(alpha_loss.item())
+            alpha = float(self.log_alpha.exp().item())
+
         return {
             'critic_loss': float(critic_loss.item()),
             'actor_loss': float(actor_loss.item()),
@@ -183,4 +207,6 @@ class CEPGLearner:
             'q_taken_mean': float((q1_taken * valid).sum().item() / valid.sum().clamp_min(1.0).item()),
             'target_mean': float((target * valid).sum().item() / valid.sum().clamp_min(1.0).item()),
             'actor_lr': float(self.actor_lr_scheduler.get_last_lr()[0]),
+            'alpha': float(alpha),
+            'alpha_loss': float(alpha_loss_val),
         }
