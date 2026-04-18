@@ -272,7 +272,12 @@ def main() -> None:
 
             next_data, reward, done, info = env.step(actions, enemy_actions=enemy_actions)
             next_obs, next_tokens, next_action_mask = next_data['obs'], next_data['tokens'], next_data['action_mask']
-            rb.add(obs, next_obs, tokens, next_tokens, action_mask, next_action_mask, actions, reward, done, agent_alive)
+            dummy_hidden = np.zeros((env.n_agents, rb.hidden.shape[2], env.obs_dim), dtype=np.float32)
+            dummy_next_hidden = np.zeros_like(dummy_hidden)
+            rb.add(
+                obs, next_obs, dummy_hidden, dummy_next_hidden, tokens, next_tokens,
+                action_mask, next_action_mask, actions, reward, done, agent_alive
+            )
 
             obs, tokens, action_mask, agent_alive = next_obs, next_tokens, next_action_mask, next_data['agent_alive']
             ep_return += reward
@@ -293,6 +298,8 @@ def main() -> None:
                     batch_t = {
                         'obs': to_torch(batch_np['obs'], device=device, dtype=torch.float32),
                         'next_obs': to_torch(batch_np['next_obs'], device=device, dtype=torch.float32),
+                        'hidden': to_torch(batch_np['hidden'], device=device, dtype=torch.float32),
+                        'next_hidden': to_torch(batch_np['next_hidden'], device=device, dtype=torch.float32),
                         'tokens': to_torch(batch_np['tokens'], device=device, dtype=torch.float32),
                         'next_tokens': to_torch(batch_np['next_tokens'], device=device, dtype=torch.float32),
                         'action_mask': to_torch(batch_np['action_mask'], device=device, dtype=torch.float32),
