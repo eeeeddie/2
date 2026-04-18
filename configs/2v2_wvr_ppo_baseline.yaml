@@ -1,6 +1,6 @@
 seed: 0
 log_dir: runs
-exp_name: 2v2_wvr_lock_v2_reward_tuned_pressure
+exp_name: 2v2_wvr_ppo_baseline
 
 env:
   combat_mode: wvr_lock
@@ -25,7 +25,6 @@ env:
   init_alt_noise: 500.0
   init_speed_noise: 35.0
 
-  # 反逃逸 / 早停约束
   crash_altitude: 100.0
   high_altitude_limit: 9000.0
   soft_boundary_radius: 16000.0
@@ -33,7 +32,6 @@ env:
   no_engage_limit: 80.0
   no_engage_distance: 10000.0
 
-  # WVR 锁定扣血
   lock_enable: true
   lock_range: 3500.0
   lock_fov_deg: 22.0
@@ -41,9 +39,7 @@ env:
   lock_rear_aspect_deg: 125.0
   lock_build_time: 1.2
   lock_break_grace: 0.2
-  lock_damage_tick: 0.18
-  
-  # 机炮
+
   gun_enable: true
   gun_range: 1500.0
   gun_fov_deg: 16.0
@@ -59,7 +55,6 @@ env:
   preferred_altitude: 4500.0
   preferred_altitude_tol: 2200.0
 
-  # ===== 结果奖励（主导）=====
   reward_kill: 14.0
   reward_loss: 12.0
   reward_step: -0.003
@@ -68,7 +63,6 @@ env:
   reward_damage_enemy: 2.0
   reward_damage_friend: 2.2
 
-  # ===== 几何/窗口 shaping（降权）=====
   reward_lock_friendly: 0.002
   reward_lock_enemy: 0.0
   reward_tail_pos: 0.025
@@ -79,7 +73,6 @@ env:
   reward_coop_pressure: 0.030
   reward_being_tailed: 0.050
 
-  # ===== 高度/边界/早停惩罚 =====
   reward_low_altitude: 0.05
   reward_altitude_band: 0.0
   reward_crash_extra: 4.0
@@ -88,62 +81,30 @@ env:
   reward_hard_boundary: 4.0
   reward_no_engage_terminate: 1.0
 
-  # ===== 严格击落胜负：timeout 不算赢，只算 draw/abort =====
   reward_timeout_draw: 1.0
   reward_enemy_abort: 0.0
 
-  # ===== 单目标单攻击者 =====
   single_attacker_per_target: true
   gun_single_attacker_per_target: true
-
-  # ===== 这两个字段只有在你的 multi_wvr_env.py 已实现时才会生效 =====
   reward_coop_kill: 5.0
   reward_man_advantage_gain: 3.0
 
-  seed: 0
-
 model:
-  actor_hidden_dim: 128
-  critic_d_model: 128
-  critic_heads: 2
-  critic_layers: 2
-  critic_ff_dim: 256
-  dropout: 0.0
+  hidden_dim: 256
 
-algo:
+ppo:
+  lr: 0.0003
+  horizon: 1024
+  epochs: 8
+  minibatch_size: 512
   gamma: 0.99
-  alpha: 0.05
-  tau: 0.01
-  lr_actor: 0.0001
-  lr_critic: 0.0002
-  huber_delta: 1.0
-  grad_clip_norm: 10.0
-
-  batch_size: 256
-  buffer_size: 100000
-  learning_starts: 5000
-  update_every: 1
-  updates_per_step: 1
-
-  epsilon_start: 0.10
-  epsilon_final: 0.01
-  epsilon_anneal_steps: 120000
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  vf_coef: 0.5
+  ent_coef: 0.005
+  max_grad_norm: 0.5
 
 train:
-  total_env_steps: 4000000
-  log_interval: 10
-  save_interval: 50
-
-eval:
-  enabled: true
-  interval_env_steps: 10000
-  episodes: 10
-  deterministic: true
-
-opponent:
-  mode: rule
-  pool_size: 10
-  snapshot_interval: 25
-  mix_rule_prob: 0.34
-  mix_current_prob: 0.33
-  mix_pool_prob: 0.33
+  total_env_steps: 1000000
+  eval_interval: 50000
+  eval_episodes: 10

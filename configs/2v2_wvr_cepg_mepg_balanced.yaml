@@ -1,6 +1,6 @@
 seed: 0
 log_dir: runs
-exp_name: 2v2_wvr_lock_v2_reward_tuned_pressure
+exp_name: 2v2_wvr_cepg_mepg_balanced
 
 env:
   combat_mode: wvr_lock
@@ -25,25 +25,21 @@ env:
   init_alt_noise: 500.0
   init_speed_noise: 35.0
 
-  # 反逃逸 / 早停约束
   crash_altitude: 100.0
-  high_altitude_limit: 9000.0
-  soft_boundary_radius: 16000.0
-  hard_boundary_radius: 22000.0
-  no_engage_limit: 80.0
-  no_engage_distance: 10000.0
+  high_altitude_limit: 12000.0
+  soft_boundary_radius: 22000.0
+  hard_boundary_radius: 28000.0
+  no_engage_limit: 120.0
+  no_engage_distance: 14000.0
 
-  # WVR 锁定扣血
   lock_enable: true
   lock_range: 3500.0
-  lock_fov_deg: 22.0
-  lock_elev_fov_deg: 18.0
+  lock_fov_deg: 24.0
+  lock_elev_fov_deg: 20.0
   lock_rear_aspect_deg: 125.0
   lock_build_time: 1.2
   lock_break_grace: 0.2
-  lock_damage_tick: 0.18
-  
-  # 机炮
+
   gun_enable: true
   gun_range: 1500.0
   gun_fov_deg: 16.0
@@ -54,53 +50,49 @@ env:
 
   auto_assign_targets: true
   script_enemy: true
+  script_enemy_eps: 0.10
   aircraft_hp: 1.0
 
   preferred_altitude: 4500.0
   preferred_altitude_tol: 2200.0
 
-  # ===== 结果奖励（主导）=====
-  reward_kill: 14.0
-  reward_loss: 12.0
-  reward_step: -0.003
-  reward_win: 18.0
-  reward_lose: 12.0
-  reward_damage_enemy: 2.0
-  reward_damage_friend: 2.2
+  reward_kill: 8.0
+  reward_loss: 10.0
+  reward_step: -0.001
+  reward_win: 20.0
+  reward_lose: 16.0
+  reward_damage_enemy: 1.0
+  reward_damage_friend: 1.2
 
-  # ===== 几何/窗口 shaping（降权）=====
-  reward_lock_friendly: 0.002
+  reward_lock_friendly: 0.003
   reward_lock_enemy: 0.0
-  reward_tail_pos: 0.025
+  reward_tail_pos: 0.030
   reward_nose_on: 0.004
   reward_gun_window: 0.015
-  reward_lock_window: 0.005
-  reward_support: 0.020
-  reward_coop_pressure: 0.030
-  reward_being_tailed: 0.050
+  reward_lock_window: 0.015
+  reward_lock_hold: 0.030
+  reward_support: 0.015
+  reward_coop_pressure: 0.015
+  reward_coop_kill: 2.0
+  reward_man_advantage_gain: 2.0
+  reward_alive_advantage: 0.8
+  reward_being_tailed: 0.060
+  reward_tail_lock_combo: 0.030
+  reward_mutual_kill: 8.0
 
-  # ===== 高度/边界/早停惩罚 =====
   reward_low_altitude: 0.05
   reward_altitude_band: 0.0
   reward_crash_extra: 4.0
-  reward_soft_boundary: 0.02
-  reward_high_altitude_terminate: 4.0
-  reward_hard_boundary: 4.0
+  reward_soft_boundary: 0.01
+  reward_high_altitude_terminate: 1.0
+  reward_hard_boundary: 2.0
   reward_no_engage_terminate: 1.0
 
-  # ===== 严格击落胜负：timeout 不算赢，只算 draw/abort =====
-  reward_timeout_draw: 1.0
+  reward_timeout_draw: 0.5
   reward_enemy_abort: 0.0
 
-  # ===== 单目标单攻击者 =====
-  single_attacker_per_target: true
-  gun_single_attacker_per_target: true
-
-  # ===== 这两个字段只有在你的 multi_wvr_env.py 已实现时才会生效 =====
-  reward_coop_kill: 5.0
-  reward_man_advantage_gain: 3.0
-
-  seed: 0
+  single_attacker_per_target: false
+  gun_single_attacker_per_target: false
 
 model:
   actor_hidden_dim: 128
@@ -112,27 +104,31 @@ model:
 
 algo:
   gamma: 0.99
-  alpha: 0.05
-  tau: 0.01
+  alpha: 0.02
+  tau: 0.005
   lr_actor: 0.0001
   lr_critic: 0.0002
   huber_delta: 1.0
-  grad_clip_norm: 10.0
+  grad_clip_norm: 5.0
+  q_eval_mode: mepg
+  alpha_auto: true
+  alpha_lr: 0.0003
+  target_entropy_ratio: 0.55
 
   batch_size: 256
-  buffer_size: 100000
+  buffer_size: 200000
   learning_starts: 5000
   update_every: 1
   updates_per_step: 1
 
-  epsilon_start: 0.10
+  epsilon_start: 0.08
   epsilon_final: 0.01
   epsilon_anneal_steps: 120000
 
 train:
   total_env_steps: 4000000
   log_interval: 10
-  save_interval: 50
+  save_interval: 100
 
 eval:
   enabled: true

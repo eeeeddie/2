@@ -21,6 +21,10 @@ class AlgoConfig:
     lr_critic: float = 4e-4
     huber_delta: float = 1.0
     grad_clip_norm: float = 10.0
+    q_eval_mode: str = 'greedy'  # greedy | mepg
+    alpha_auto: bool = True
+    alpha_lr: float = 1e-4
+    target_entropy_ratio: float = 0.55
 
 
 class CEPGLearner:
@@ -33,6 +37,14 @@ class CEPGLearner:
         self.cfg = cfg
         self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=cfg.lr_actor)
         self.critic_opt = torch.optim.Adam(list(critic1.parameters()) + list(critic2.parameters()), lr=cfg.lr_critic)
+        self.log_alpha = None
+        self.alpha_opt = None
+        self.target_entropy = None
+        if cfg.alpha_auto:
+            init_alpha = max(cfg.alpha, 1e-6)
+            self.log_alpha = torch.tensor(float(torch.log(torch.tensor(init_alpha))), device=self.device, requires_grad=True)
+            self.alpha_opt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
+            self.target_entropy = None
 
         self.actor_lr_scheduler = LinearLR(self.actor_opt, start_factor=0.01, total_iters=2000)
 
@@ -55,10 +67,43 @@ class CEPGLearner:
             actions[:, i] = torch.distributions.Categorical(probs=p).sample()
         return actions
 
+    @torch.no_grad()
+    def _greedy_joint_actions(self, probs: torch.Tensor, action_mask: torch.Tensor) -> torch.Tensor:
+        legal = action_mask.bool()
+        masked = probs.masked_fill(~legal, float('-inf'))
+        greedy = masked.argmax(dim=-1)
+        # 对“全非法”行回退到 default=2（平飞）
+        all_illegal = ~legal.any(dim=-1)
+        if all_illegal.any():
+            greedy = greedy.masked_fill(all_illegal, 2)
+        return greedy.long()
+
     def _polyak(self, online: nn.Module, target: nn.Module) -> None:
         with torch.no_grad():
             for p, tp in zip(online.parameters(), target.parameters()):
                 tp.data.mul_(1.0 - self.cfg.tau).add_(self.cfg.tau * p.data)
+
+    def _expected_min_q_two_agent(self, tokens: torch.Tensor, probs: torch.Tensor) -> torch.Tensor:
+        # 仅在 2v2 场景启用 MEPG：对队友动作做精确枚举期望，降低目标估计误差
+        bsz, n_agents, n_actions = probs.shape
+        if n_agents != 2:
+            raise ValueError('MEPG currently supports n_agents == 2 only.')
+        exp_q = torch.zeros((bsz, n_agents, n_actions), device=tokens.device, dtype=tokens.dtype)
+
+        # agent-0: E_{a1 ~ pi1}[Q0(., a1)]
+        for a1 in range(n_actions):
+            joint = torch.zeros((bsz, n_agents), device=tokens.device, dtype=torch.long)
+            joint[:, 1] = a1
+            q = torch.min(self.critic1(tokens, joint), self.critic2(tokens, joint))
+            exp_q[:, 0, :] += probs[:, 1, a1].unsqueeze(-1) * q[:, 0, :]
+
+        # agent-1: E_{a0 ~ pi0}[Q1(., a0)]
+        for a0 in range(n_actions):
+            joint = torch.zeros((bsz, n_agents), device=tokens.device, dtype=torch.long)
+            joint[:, 0] = a0
+            q = torch.min(self.critic1(tokens, joint), self.critic2(tokens, joint))
+            exp_q[:, 1, :] += probs[:, 0, a0].unsqueeze(-1) * q[:, 1, :]
+        return exp_q
 
     def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
         obs = batch['obs']
@@ -73,19 +118,30 @@ class CEPGLearner:
         rewards = batch['rewards']
         dones = batch['dones']
         valid = batch['agent_alive'].float()
+        n_actions = action_mask.shape[-1]
+        alpha = float(self.log_alpha.exp().item()) if self.log_alpha is not None else self.cfg.alpha
+        if self.target_entropy is None:
+            self.target_entropy = float(self.cfg.target_entropy_ratio * torch.log(torch.tensor(float(n_actions))).item())
 
         # ================= 1. Critic Update =================
         with torch.no_grad():
             pi_next, _, _ = self.actor(next_obs, next_action_mask, next_hidden)
-            next_joint_actions = self._sample_joint_actions(pi_next, next_action_mask)
-
-            q1_next = self.target_critic1(next_tokens, next_joint_actions)
-            q2_next = self.target_critic2(next_tokens, next_joint_actions)
-            q_next = torch.min(q1_next, q2_next)
+            if self.cfg.q_eval_mode == 'mepg' and pi_next.shape[1] == 2:
+                # MEPG: 精确枚举队友动作期望，减少偏差和方差
+                old_c1, old_c2 = self.critic1, self.critic2
+                self.critic1, self.critic2 = self.target_critic1, self.target_critic2
+                q_next = self._expected_min_q_two_agent(next_tokens, pi_next)
+                self.critic1, self.critic2 = old_c1, old_c2
+            else:
+                # 用贪心联合动作替代随机采样，降低 target 方差，提升 critic 稳定性
+                next_joint_actions = self._greedy_joint_actions(pi_next, next_action_mask)
+                q1_next = self.target_critic1(next_tokens, next_joint_actions)
+                q2_next = self.target_critic2(next_tokens, next_joint_actions)
+                q_next = torch.min(q1_next, q2_next)
 
             log_pi_next = torch.log(pi_next.clamp_min(1e-8))
             # 引入 next_action_mask 过滤非法动作产生的极端 log_pi
-            v_next_val = pi_next * (q_next - self.cfg.alpha * log_pi_next)
+            v_next_val = pi_next * (q_next - alpha * log_pi_next)
             v_next = (v_next_val * next_action_mask).sum(dim=-1)
 
             target = rewards.unsqueeze(-1) + self.cfg.gamma * (1.0 - dones.unsqueeze(-1)) * v_next
@@ -109,14 +165,15 @@ class CEPGLearner:
         pi, _, _ = self.actor(obs, action_mask, hidden)
         log_pi = torch.log(pi.clamp_min(1e-8))
 
-        # 修复：必须基于当前策略采样的联合动作评估 Q 值，不能使用 replay buffer 中的旧动作
-        with torch.no_grad():
-            current_joint_actions = self._sample_joint_actions(pi, action_mask)
-
-        q_for_pi = torch.min(self.critic1(tokens, current_joint_actions), self.critic2(tokens, current_joint_actions))
+        if self.cfg.q_eval_mode == 'mepg' and pi.shape[1] == 2:
+            q_for_pi = self._expected_min_q_two_agent(tokens, pi)
+        else:
+            # 采用 replay 联合动作作为队友条件，显著降低 actor 目标的蒙特卡洛噪声
+            q_for_pi = torch.min(self.critic1(tokens, actions), self.critic2(tokens, actions))
+        q_for_pi = q_for_pi.detach()
 
         # 引入 action_mask 避免非法动作梯度爆炸
-        actor_obj = pi * (q_for_pi - self.cfg.alpha * log_pi)
+        actor_obj = pi * (q_for_pi - alpha * log_pi)
         actor_obj = (actor_obj * action_mask).sum(dim=-1)
         actor_loss = -(actor_obj * valid).sum() / valid.sum().clamp_min(1.0)
 
@@ -134,6 +191,15 @@ class CEPGLearner:
         ent = (ent * action_mask).sum(dim=-1)
         ent = (ent * valid).sum() / valid.sum().clamp_min(1.0)
 
+        alpha_loss_val = 0.0
+        if self.log_alpha is not None and self.alpha_opt is not None:
+            alpha_loss = self.log_alpha * (ent.detach() - self.target_entropy)
+            self.alpha_opt.zero_grad(set_to_none=True)
+            alpha_loss.backward()
+            self.alpha_opt.step()
+            alpha_loss_val = float(alpha_loss.item())
+            alpha = float(self.log_alpha.exp().item())
+
         return {
             'critic_loss': float(critic_loss.item()),
             'actor_loss': float(actor_loss.item()),
@@ -141,4 +207,6 @@ class CEPGLearner:
             'q_taken_mean': float((q1_taken * valid).sum().item() / valid.sum().clamp_min(1.0).item()),
             'target_mean': float((target * valid).sum().item() / valid.sum().clamp_min(1.0).item()),
             'actor_lr': float(self.actor_lr_scheduler.get_last_lr()[0]),
+            'alpha': float(alpha),
+            'alpha_loss': float(alpha_loss_val),
         }

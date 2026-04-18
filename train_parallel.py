@@ -326,7 +326,7 @@ def main():
                 s['return'] += reward
                 s['len'] += 1
                 s['fires'] += len(info.get('fire_events', []))
-                s['kills'] += len(info.get('kill_events', []))
+                s['kills'] += int(info.get('friendly_kills', 0))
 
                 if done:
                     episode += 1
