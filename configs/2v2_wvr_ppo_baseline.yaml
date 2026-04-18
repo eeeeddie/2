@@ -1,0 +1,110 @@
+seed: 0
+log_dir: runs
+exp_name: 2v2_wvr_ppo_baseline
+
+env:
+  combat_mode: wvr_lock
+  n_agents: 2
+  n_enemies: 2
+  max_steps: 320
+  physics_dt: 0.1
+  decision_skip: 10
+
+  arena_xy: 25000.0
+  clip_arena_xy: false
+
+  min_alt: 400.0
+  max_alt: 20000.0
+  init_alt: 4500.0
+  init_speed: 290.0
+  init_range_min: 3000.0
+  init_range_max: 5500.0
+  init_lateral_spread: 1200.0
+  line_spacing: 1000.0
+  init_heading_noise: 0.35
+  init_alt_noise: 500.0
+  init_speed_noise: 35.0
+
+  crash_altitude: 100.0
+  high_altitude_limit: 9000.0
+  soft_boundary_radius: 16000.0
+  hard_boundary_radius: 22000.0
+  no_engage_limit: 80.0
+  no_engage_distance: 10000.0
+
+  lock_enable: true
+  lock_range: 3500.0
+  lock_fov_deg: 22.0
+  lock_elev_fov_deg: 18.0
+  lock_rear_aspect_deg: 125.0
+  lock_build_time: 1.2
+  lock_break_grace: 0.2
+
+  gun_enable: true
+  gun_range: 1500.0
+  gun_fov_deg: 16.0
+  gun_elev_fov_deg: 12.0
+  gun_rear_aspect_deg: 135.0
+  gun_burst_cooldown: 0.5
+  gun_damage: 0.2
+
+  auto_assign_targets: true
+  script_enemy: true
+  aircraft_hp: 1.0
+
+  preferred_altitude: 4500.0
+  preferred_altitude_tol: 2200.0
+
+  reward_kill: 14.0
+  reward_loss: 12.0
+  reward_step: -0.003
+  reward_win: 18.0
+  reward_lose: 12.0
+  reward_damage_enemy: 2.0
+  reward_damage_friend: 2.2
+
+  reward_lock_friendly: 0.002
+  reward_lock_enemy: 0.0
+  reward_tail_pos: 0.025
+  reward_nose_on: 0.004
+  reward_gun_window: 0.015
+  reward_lock_window: 0.005
+  reward_support: 0.020
+  reward_coop_pressure: 0.030
+  reward_being_tailed: 0.050
+
+  reward_low_altitude: 0.05
+  reward_altitude_band: 0.0
+  reward_crash_extra: 4.0
+  reward_soft_boundary: 0.02
+  reward_high_altitude_terminate: 4.0
+  reward_hard_boundary: 4.0
+  reward_no_engage_terminate: 1.0
+
+  reward_timeout_draw: 1.0
+  reward_enemy_abort: 0.0
+
+  single_attacker_per_target: true
+  gun_single_attacker_per_target: true
+  reward_coop_kill: 5.0
+  reward_man_advantage_gain: 3.0
+
+model:
+  hidden_dim: 256
+
+ppo:
+  lr: 0.0003
+  horizon: 1024
+  epochs: 8
+  minibatch_size: 512
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  vf_coef: 0.5
+  ent_coef: 0.005
+  max_grad_norm: 0.5
+
+train:
+  total_env_steps: 1000000
+  eval_interval: 50000
+  eval_episodes: 10
