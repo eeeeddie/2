@@ -41,3 +41,12 @@ python eval_tacview.py --ckpt runs/2v2_wvr_lock_debug/final.pt --device cuda --e
 ```bash
 python train_ppo.py --config configs/2v2_wvr_ppo_baseline.yaml --device cuda
 ```
+
+若先做“仅态势占位”课程学习（禁用攻击伤害与击落），可使用：
+
+```bash
+python train_ppo.py --config configs/2v2_wvr_ppo_positioning.yaml --device cuda
+```
+
+该配置默认启用 `reward_mode: reference_position`，其态势奖励形式参考
+`f1(角度) + f2(距离) + f4(高度)` 的单机可收敛设计，便于先学会占位再恢复完整对抗。
