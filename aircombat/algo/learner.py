@@ -123,6 +123,11 @@ class CEPGLearner:
 
         # 采用 replay 联合动作作为队友条件，显著降低 actor 目标的蒙特卡洛噪声
         q_for_pi = torch.min(self.critic1(tokens, actions), self.critic2(tokens, actions))
+        # 修复：必须基于当前策略采样的联合动作评估 Q 值，不能使用 replay buffer 中的旧动作
+        with torch.no_grad():
+            current_joint_actions = self._sample_joint_actions(pi, action_mask)
+
+        q_for_pi = torch.min(self.critic1(tokens, current_joint_actions), self.critic2(tokens, current_joint_actions))
         q_for_pi = q_for_pi.detach()
 
         # 引入 action_mask 避免非法动作梯度爆炸
