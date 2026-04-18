@@ -78,6 +78,7 @@ class EnvConfig:
 
     auto_assign_targets: bool = True
     script_enemy: bool = True
+    script_enemy_eps: float = 0.0
 
     aircraft_hp: float = 1.0
     crash_altitude: float = 100.0
@@ -580,6 +581,8 @@ class MultiAgentWVRCombatEnv:
     def _script_enemy_action(self, ac: AircraftModel) -> int:
         if not ac.alive:
             return 2
+        if self.cfg.script_enemy_eps > 0.0 and float(self.rng.random()) < self.cfg.script_enemy_eps:
+            return int(self.rng.integers(0, self.n_actions))
         tgt_idx = ac.assigned_target if ac.assigned_target is not None else ac.locked_target
         if tgt_idx is None:
             return 0

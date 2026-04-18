@@ -21,6 +21,7 @@ class AlgoConfig:
     lr_critic: float = 4e-4
     huber_delta: float = 1.0
     grad_clip_norm: float = 10.0
+    q_eval_mode: str = 'greedy'  # greedy | mepg
 
 
 class CEPGLearner:
@@ -70,6 +71,28 @@ class CEPGLearner:
         with torch.no_grad():
             for p, tp in zip(online.parameters(), target.parameters()):
                 tp.data.mul_(1.0 - self.cfg.tau).add_(self.cfg.tau * p.data)
+
+    def _expected_min_q_two_agent(self, tokens: torch.Tensor, probs: torch.Tensor) -> torch.Tensor:
+        # 仅在 2v2 场景启用 MEPG：对队友动作做精确枚举期望，降低目标估计误差
+        bsz, n_agents, n_actions = probs.shape
+        if n_agents != 2:
+            raise ValueError('MEPG currently supports n_agents == 2 only.')
+        exp_q = torch.zeros((bsz, n_agents, n_actions), device=tokens.device, dtype=tokens.dtype)
+
+        # agent-0: E_{a1 ~ pi1}[Q0(., a1)]
+        for a1 in range(n_actions):
+            joint = torch.zeros((bsz, n_agents), device=tokens.device, dtype=torch.long)
+            joint[:, 1] = a1
+            q = torch.min(self.critic1(tokens, joint), self.critic2(tokens, joint))
+            exp_q[:, 0, :] += probs[:, 1, a1].unsqueeze(-1) * q[:, 0, :]
+
+        # agent-1: E_{a0 ~ pi0}[Q1(., a0)]
+        for a0 in range(n_actions):
+            joint = torch.zeros((bsz, n_agents), device=tokens.device, dtype=torch.long)
+            joint[:, 0] = a0
+            q = torch.min(self.critic1(tokens, joint), self.critic2(tokens, joint))
+            exp_q[:, 1, :] += probs[:, 0, a0].unsqueeze(-1) * q[:, 1, :]
+        return exp_q
 
     def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
         obs = batch['obs']
