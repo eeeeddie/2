@@ -33,3 +33,11 @@
 python train.py --config configs/2v2_wvr_debug.yaml --device cuda
 python eval_tacview.py --ckpt runs/2v2_wvr_lock_debug/final.pt --device cuda --episodes 2 --deterministic
 ```
+
+## PPO 基线（用于快速排查环境可学习性）
+
+当 CEPG + Transformer 难以收敛时，可先运行 PPO 验证环境和奖励是否可学：
+
+```bash
+python train_ppo.py --config configs/2v2_wvr_ppo_baseline.yaml --device cuda
+```
