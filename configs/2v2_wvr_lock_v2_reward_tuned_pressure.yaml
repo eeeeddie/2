@@ -21,6 +21,9 @@ env:
   init_range_max: 5500.0
   init_lateral_spread: 1200.0
   line_spacing: 1000.0
+  init_heading_noise: 0.35
+  init_alt_noise: 500.0
+  init_speed_noise: 35.0
 
   # 反逃逸 / 早停约束
   crash_altitude: 100.0
@@ -68,12 +71,12 @@ env:
   # ===== 几何/窗口 shaping（降权）=====
   reward_lock_friendly: 0.002
   reward_lock_enemy: 0.0
-  reward_tail_pos: 0.040
-  reward_nose_on: 0.002
-  reward_gun_window: 0.020
+  reward_tail_pos: 0.025
+  reward_nose_on: 0.004
+  reward_gun_window: 0.015
   reward_lock_window: 0.005
-  reward_support: 0.060
-  reward_coop_pressure: 0.080
+  reward_support: 0.020
+  reward_coop_pressure: 0.030
   reward_being_tailed: 0.050
 
   # ===== 高度/边界/早停惩罚 =====
@@ -83,7 +86,7 @@ env:
   reward_soft_boundary: 0.02
   reward_high_altitude_terminate: 4.0
   reward_hard_boundary: 4.0
-  reward_no_engage_terminate: 3.0
+  reward_no_engage_terminate: 1.0
 
   # ===== 严格击落胜负：timeout 不算赢，只算 draw/abort =====
   reward_timeout_draw: 1.0
@@ -109,22 +112,22 @@ model:
 
 algo:
   gamma: 0.99
-  alpha: 0.02
+  alpha: 0.05
   tau: 0.01
-  lr_actor: 0.0002
-  lr_critic: 0.0004
+  lr_actor: 0.0001
+  lr_critic: 0.0002
   huber_delta: 1.0
   grad_clip_norm: 10.0
 
-  batch_size: 128
-  buffer_size: 20000
-  learning_starts: 800
+  batch_size: 256
+  buffer_size: 100000
+  learning_starts: 5000
   update_every: 1
   updates_per_step: 1
 
-  epsilon_start: 0.05
-  epsilon_final: 0.0
-  epsilon_anneal_steps: 15000
+  epsilon_start: 0.10
+  epsilon_final: 0.01
+  epsilon_anneal_steps: 120000
 
 train:
   total_env_steps: 4000000
