@@ -73,6 +73,9 @@ class EnvConfig:
     gun_damage: float = 0.20
     gun_single_attacker_per_target: bool = False
 
+    # 训练课程开关：仅学习态势占位，不进行任何攻击伤害/击落
+    disable_attack_damage: bool = False
+
     auto_assign_targets: bool = True
     script_enemy: bool = True
 
@@ -108,6 +111,15 @@ class EnvConfig:
     reward_low_altitude: float = 0.05
     reward_altitude_band: float = 0.0
     reward_crash_extra: float = 4.0
+    # 可选：使用单机空战常见“角度-距离-高度”态势奖励
+    use_reference_posture_reward: bool = False
+    ref_posture_weight: float = 0.2
+    ref_posture_d0: float = 200.0
+    ref_posture_dmax: float = 1000.0
+    ref_posture_h_floor: float = 1000.0
+    ref_posture_w_a: float = 0.8
+    ref_posture_w_d: float = 0.3
+    ref_posture_w_h: float = 0.2
 
     missiles_per_aircraft: int = 0
     incoming_missile_warn_range: float = 0.0
@@ -500,11 +512,13 @@ class MultiAgentWVRCombatEnv:
                 pressure_targets.add(tgt_idx)
 
             for score, ac in selected:
+                fire_events.append((ac.team_id, ac.slot_idx, tgt.slot_idx))
+                if self.cfg.disable_attack_damage:
+                    continue
+
                 # 持续扣除对应 physics_dt 的伤害
                 damage = self.cfg.lock_damage_rate * self.cfg.physics_dt
                 tgt.hp = max(0.0, tgt.hp - damage)
-
-                fire_events.append((ac.team_id, ac.slot_idx, tgt.slot_idx))
                 damage_events.append((ac.team_id, ac.slot_idx, tgt.team_id, tgt.slot_idx, damage))
 
                 if tgt.hp <= 0.0 and tgt.alive:
@@ -549,10 +563,13 @@ class MultiAgentWVRCombatEnv:
                 pressure_targets.add(tgt_idx)
             for score, ac in selected:
                 ac.last_gun_time = self.sim_time
+                gun_events.append((ac.team_id, ac.slot_idx, tgt.slot_idx))
+                if self.cfg.disable_attack_damage:
+                    continue
+
                 damage = self.cfg.gun_damage * (0.65 + 0.35 * max(score, 0.0))
                 tgt.hp = max(0.0, tgt.hp - damage)
                 damage_events.append((ac.team_id, ac.slot_idx, tgt.team_id, tgt.slot_idx, damage))
-                gun_events.append((ac.team_id, ac.slot_idx, tgt.slot_idx))
                 if tgt.hp <= 0.0 and tgt.alive:
                     tgt.alive = False
                     kill_events.append((ac.team_id, ac.slot_idx, tgt.team_id, tgt.slot_idx,
@@ -623,6 +640,42 @@ class MultiAgentWVRCombatEnv:
         if friend_hp + 1e-6 < enemy_hp:
             return 'enemy_advantage'
         return 'draw'
+
+    def _reference_posture_reward(self, me: AircraftModel, tgt: AircraftModel) -> float:
+        dx = float(tgt.x - me.x)
+        dy = float(tgt.y - me.y)
+        dz = float(tgt.z - me.z)
+        dist = math.sqrt(dx * dx + dy * dy + dz * dz) + 1e-6
+        dir_x, dir_y, dir_z = dx / dist, dy / dist, dz / dist
+
+        my_vx = me.v * math.cos(me.gamma) * math.sin(me.psi)
+        my_vy = me.v * math.cos(me.gamma) * math.cos(me.psi)
+        my_vz = me.v * math.sin(me.gamma)
+        tgt_vx = tgt.v * math.cos(tgt.gamma) * math.sin(tgt.psi)
+        tgt_vy = tgt.v * math.cos(tgt.gamma) * math.cos(tgt.psi)
+        tgt_vz = tgt.v * math.sin(tgt.gamma)
+
+        my_v_norm = math.sqrt(my_vx * my_vx + my_vy * my_vy + my_vz * my_vz) + 1e-6
+        tgt_v_norm = math.sqrt(tgt_vx * tgt_vx + tgt_vy * tgt_vy + tgt_vz * tgt_vz) + 1e-6
+        my_nx, my_ny, my_nz = my_vx / my_v_norm, my_vy / my_v_norm, my_vz / my_v_norm
+        tgt_nx, tgt_ny, tgt_nz = tgt_vx / tgt_v_norm, tgt_vy / tgt_v_norm, tgt_vz / tgt_v_norm
+
+        afz = float(np.clip(dir_x * my_nx + dir_y * my_ny + dir_z * my_nz, -1.0, 1.0))
+        afzp = float(np.clip(dir_x * tgt_nx + dir_y * tgt_ny + dir_z * tgt_nz, -1.0, 1.0))
+        alpha = math.acos(afz)
+        alphap = math.acos(afzp)
+        f1 = 1.0 - (abs(alpha) + abs(alphap)) / (math.pi * 2.0)
+
+        d0 = max(self.cfg.ref_posture_d0, 1.0)
+        dmax = max(self.cfg.ref_posture_dmax, 1.0)
+        if dist >= d0:
+            f2 = math.exp(-(dist - d0) / dmax)
+        else:
+            f2 = math.exp((dist - d0) / d0)
+
+        h_floor = max(self.cfg.ref_posture_h_floor, 1.0)
+        f4 = 1.0 if me.z >= h_floor else (me.z / h_floor)
+        return float(self.cfg.ref_posture_w_a * f1 + self.cfg.ref_posture_w_d * f2 + self.cfg.ref_posture_w_h * f4)
 
     def _compute_reward(self, prev_enemy_alive, prev_friend_alive, prev_enemy_hp, prev_friend_hp,
                         fire_events, gun_events, damage_events, kill_events, crash_events,
@@ -701,6 +754,8 @@ class MultiAgentWVRCombatEnv:
                 reward += self.cfg.reward_gun_window
             if self._lock_score(me, tgt) >= 0.20:
                 reward += self.cfg.reward_lock_window
+            if self.cfg.use_reference_posture_reward:
+                reward += self.cfg.ref_posture_weight * self._reference_posture_reward(me, tgt)
             if me.z < self.cfg.min_alt:
                 low_frac = (self.cfg.min_alt - me.z) / max(self.cfg.min_alt - self.cfg.crash_altitude, 1.0)
                 reward -= self.cfg.reward_low_altitude * float(np.clip(low_frac, 0.0, 1.5))
