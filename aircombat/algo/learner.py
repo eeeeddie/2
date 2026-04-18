@@ -55,6 +55,17 @@ class CEPGLearner:
             actions[:, i] = torch.distributions.Categorical(probs=p).sample()
         return actions
 
+    @torch.no_grad()
+    def _greedy_joint_actions(self, probs: torch.Tensor, action_mask: torch.Tensor) -> torch.Tensor:
+        legal = action_mask.bool()
+        masked = probs.masked_fill(~legal, float('-inf'))
+        greedy = masked.argmax(dim=-1)
+        # 对“全非法”行回退到 default=2（平飞）
+        all_illegal = ~legal.any(dim=-1)
+        if all_illegal.any():
+            greedy = greedy.masked_fill(all_illegal, 2)
+        return greedy.long()
+
     def _polyak(self, online: nn.Module, target: nn.Module) -> None:
         with torch.no_grad():
             for p, tp in zip(online.parameters(), target.parameters()):
@@ -77,7 +88,8 @@ class CEPGLearner:
         # ================= 1. Critic Update =================
         with torch.no_grad():
             pi_next, _, _ = self.actor(next_obs, next_action_mask, next_hidden)
-            next_joint_actions = self._sample_joint_actions(pi_next, next_action_mask)
+            # 用贪心联合动作替代随机采样，降低 target 方差，提升 critic 稳定性
+            next_joint_actions = self._greedy_joint_actions(pi_next, next_action_mask)
 
             q1_next = self.target_critic1(next_tokens, next_joint_actions)
             q2_next = self.target_critic2(next_tokens, next_joint_actions)
@@ -109,6 +121,8 @@ class CEPGLearner:
         pi, _, _ = self.actor(obs, action_mask, hidden)
         log_pi = torch.log(pi.clamp_min(1e-8))
 
+        # 采用 replay 联合动作作为队友条件，显著降低 actor 目标的蒙特卡洛噪声
+        q_for_pi = torch.min(self.critic1(tokens, actions), self.critic2(tokens, actions))
         # 修复：必须基于当前策略采样的联合动作评估 Q 值，不能使用 replay buffer 中的旧动作
         with torch.no_grad():
             current_joint_actions = self._sample_joint_actions(pi, action_mask)
