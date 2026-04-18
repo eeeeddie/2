@@ -114,6 +114,7 @@ class CEPGLearner:
             current_joint_actions = self._sample_joint_actions(pi, action_mask)
 
         q_for_pi = torch.min(self.critic1(tokens, current_joint_actions), self.critic2(tokens, current_joint_actions))
+        q_for_pi = q_for_pi.detach()
 
         # 引入 action_mask 避免非法动作梯度爆炸
         actor_obj = pi * (q_for_pi - self.cfg.alpha * log_pi)
